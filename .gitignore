@@ -17,3 +17,24 @@ Data/
 *.pem
 *.pfx
 *.p12
+
+# Local tests, verification, and delivery artifacts
+**/tests/
+**/Tests/
+**/*Tests/
+**/TestResults/
+*.trx
+*.coverage*
+artifacts/
+.planning/
+.doc-cache/
+demo/
+docs/verification/
+docs/baseline/
+**/测试报告.md
+**/测试记录.md
+交付/
+最终交付/
+.vs/
+.idea/
+*.log
