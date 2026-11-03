@@ -359,22 +359,88 @@ internal sealed class ReadingDialog : Window
 
 internal sealed class CompletedReadingsDialog : Window
 {
-    public CompletedReadingsDialog(Window owner, DeskState state, ModelSettingsStore settings, IReadingAnalysisService service)
+    private readonly DeskState state;
+    private readonly ModelSettingsStore settings;
+    private readonly IReadingAnalysisService service;
+    private readonly Func<CompletedReading, bool> delete;
+    private readonly TextBox search = ReadingUi.Field();
+    private readonly Button clear;
+    private readonly TextBlock summary = Ui.Text("", 12, Ui.Muted);
+    private readonly TextBlock status = Ui.Text("", 12, Ui.Muted);
+    private readonly StackPanel rows = new();
+
+    public CompletedReadingsDialog(Window owner, DeskState state, ModelSettingsStore settings, IReadingAnalysisService service,
+        Func<CompletedReading, bool> delete)
     {
+        this.state = state; this.settings = settings; this.service = service; this.delete = delete;
         ReadingUi.Configure(this, owner, "已完成阅读", 760, 620);
         var layout = new DockPanel(); var header = ReadingUi.Header(this, "已完成阅读"); DockPanel.SetDock(header, Dock.Top); layout.Children.Add(header);
-        var rows = new StackPanel();
-        if (state.CompletedReadings.Count == 0) rows.Children.Add(Ui.Text("尚无已完成阅读。阅读卡片点击勾号后，笔记会保留在这里。", 14, Ui.Muted));
-        foreach (var entry in state.CompletedReadings.OrderByDescending(x => x.CompletedAt))
+        var filter = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+        var label = Ui.Text("查找记录 · 按标题即时筛选", 12, Ui.Muted); label.Margin = new Thickness(0, 0, 0, 7); filter.Children.Add(label);
+        var searchRow = new Grid(); searchRow.ColumnDefinitions.Add(new ColumnDefinition()); searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        search.MaxLength = 300; search.ToolTip = "按阅读标题部分匹配，不区分英文字母大小写";
+        System.Windows.Automation.AutomationProperties.SetName(search, "查找已完成阅读标题"); searchRow.Children.Add(search);
+        clear = Ui.Button("清空", "清空查找并显示全部记录", () => { search.Clear(); search.Focus(); }); clear.Margin = new Thickness(8, 0, 0, 0);
+        Grid.SetColumn(clear, 1); searchRow.Children.Add(clear); filter.Children.Add(searchRow);
+        summary.Margin = new Thickness(0, 8, 0, 0); filter.Children.Add(summary);
+        DockPanel.SetDock(filter, Dock.Top); layout.Children.Add(filter);
+        status.Margin = new Thickness(0, 8, 0, 0); status.Visibility = Visibility.Collapsed;
+        DockPanel.SetDock(status, Dock.Bottom); layout.Children.Add(status);
+        layout.Children.Add(new ScrollViewer { Content = rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        Content = WindowAppearance.Shell(this, layout, new Thickness(22));
+        search.TextChanged += (_, _) => { status.Visibility = Visibility.Collapsed; RefreshRows(); };
+        Loaded += (_, _) => search.Focus();
+        RefreshRows();
+    }
+
+    private void RefreshRows()
+    {
+        rows.Children.Clear();
+        string query = search.Text.Trim();
+        var matches = state.CompletedReadings.Where(x => query.Length == 0 || x.Item.Title.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.CompletedAt).ToList();
+        clear.IsEnabled = search.Text.Length > 0;
+        summary.Text = query.Length == 0 ? $"共 {state.CompletedReadings.Count} 条记录" : $"找到 {matches.Count} 条 / 共 {state.CompletedReadings.Count} 条";
+        if (matches.Count == 0) rows.Children.Add(Ui.Text(state.CompletedReadings.Count == 0
+            ? "尚无已完成阅读。阅读卡片点击勾号后，笔记会保留在这里。" : "未找到匹配记录，请更换关键词或清空查找。", 14, Ui.Muted));
+        foreach (var entry in matches)
         {
             var row = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
             row.Children.Add(Ui.Text(entry.Item.Title, 16)); row.Children.Add(Ui.Text($"完成于 {entry.CompletedAt:yyyy-MM-dd HH:mm}", 12, Ui.Muted));
+            var actions = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
             var button = Ui.Button("查看笔记", "离线查看原文与已保存笔记", () => new ReadingDialog(this, entry.Item, settings, service, null, true).ShowDialog());
-            button.HorizontalAlignment = HorizontalAlignment.Left; button.Margin = new Thickness(0, 8, 0, 0); row.Children.Add(button);
-            rows.Children.Add(Ui.Shell(row, new Thickness(14)));
+            button.Margin = new Thickness(0, 0, 8, 4); actions.Children.Add(button);
+            var remove = Ui.Button("删除记录", "删除已完成阅读及笔记：" + entry.Item.Title, () => DeleteEntry(entry));
+            remove.Foreground = Ui.Red; remove.Margin = new Thickness(0, 0, 0, 4); actions.Children.Add(remove); row.Children.Add(actions);
+            var shell = Ui.Shell(row, new Thickness(14)); shell.Tag = entry.Item.Id; rows.Children.Add(shell);
         }
-        layout.Children.Add(new ScrollViewer { Content = rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        Content = WindowAppearance.Shell(this, layout, new Thickness(22));
+    }
+
+    private void DeleteEntry(CompletedReading entry)
+    {
+        if (new CompletedReadingDeleteDialog(this, entry.Item.Title).ShowDialog() != true) return;
+        bool saved = delete(entry);
+        RefreshRows();
+        status.Text = saved ? "已删除记录：" + entry.Item.Title : "未能保存删除，记录已保留。请检查数据目录后重试。";
+        status.Foreground = saved ? Ui.Muted : Ui.Red; status.Visibility = Visibility.Visible;
+    }
+}
+
+internal sealed class CompletedReadingDeleteDialog : DeskDialog
+{
+    private readonly Button cancel;
+    private readonly Button confirm;
+    public CompletedReadingDeleteDialog(Window owner, string title) : base(owner, "删除阅读记录", 420)
+    {
+        var name = Ui.Text(title, 16); name.FontWeight = FontWeights.SemiBold; name.MaxHeight = 70;
+        name.TextTrimming = TextTrimming.CharacterEllipsis; name.ToolTip = title; name.Margin = new Thickness(0, 0, 0, 12); Body.Children.Add(name);
+        Body.Children.Add(Ui.Text("该记录及保存的笔记将从已完成阅读中删除，无法在界面中撤销。", 13, Ui.Muted));
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
+        cancel = Ui.Button("取消", "保留阅读记录", () => DialogResult = false); cancel.IsDefault = true; cancel.IsCancel = true;
+        cancel.Margin = new Thickness(0, 0, 8, 0); actions.Children.Add(cancel);
+        confirm = Ui.Button("删除记录", "确认删除该完成记录及保存的笔记", () => DialogResult = true);
+        confirm.Background = Ui.Brush("#63323D"); confirm.Foreground = Ui.Brush("#FFE1E5"); actions.Children.Add(confirm); Body.Children.Add(actions);
+        Loaded += (_, _) => cancel.Focus();
     }
 }
 

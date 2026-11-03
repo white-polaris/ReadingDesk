@@ -122,8 +122,20 @@ public static class TaskHistory
     public static bool Undo(DeskState state, TaskRemoval removal)
     {
         if (state.Items.Any(x => x.Id == removal.Item.Id)) return false;
+        if (removal.Archived && !state.CompletedReadings.Any(x => x.Item.Id == removal.Item.Id)) return false;
         if (removal.Archived) state.CompletedReadings.RemoveAll(x => x.Item.Id == removal.Item.Id);
         state.Items.Insert(Math.Clamp(removal.Index, 0, state.Items.Count), removal.Item);
         return true;
+    }
+
+    public static bool DeleteCompleted(DeskState state, Guid itemId, Func<bool> persist)
+    {
+        int index = state.CompletedReadings.FindIndex(x => x.Item.Id == itemId);
+        if (index < 0) return false;
+        var entry = state.CompletedReadings[index];
+        bool saved = false;
+        state.CompletedReadings.RemoveAt(index);
+        try { saved = persist(); return saved; }
+        finally { if (!saved) state.CompletedReadings.Insert(index, entry); }
     }
 }

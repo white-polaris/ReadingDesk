@@ -10,7 +10,7 @@
     <RootNamespace>DDLDesk</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>2.0.4</Version>
+    <Version>2.0.5</Version>
     <DebugType>none</DebugType>
     <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
   </PropertyGroup>

@@ -158,7 +158,7 @@ public sealed class MainWindow : Window
         root.Children.Add(header);
         var readingTools = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
         var newReading = Ui.Button("＋ 新建阅读", "粘贴文献片段并整理阅读笔记", () => EditReading(null));
-        var completed = Ui.Button("已完成阅读", "查看完成后保留的阅读笔记", () => { CancelDrag(); new CompletedReadingsDialog(this, state, modelSettings, this.analysisService).ShowDialog(); });
+        var completed = Ui.Button("已完成阅读", "查看、查找和删除已完成阅读记录", OpenCompletedReadings);
         var model = Ui.Button("模型设置", "配置接口与加密保存的密钥", () => { CancelDrag(); new ModelSettingsDialog(this, modelSettings, this.analysisService).ShowDialog(); });
         foreach (var button in new[] { newReading, completed, model }) { button.FontSize = 11; button.Margin = new Thickness(0, 0, 6, 4); readingTools.Children.Add(button); }
         root.Children.Add(readingTools);
@@ -224,14 +224,27 @@ public sealed class MainWindow : Window
     private void SavePosition() { ClampPosition(); state.Left = Left; state.Top = Top; Save(); }
     public void Reveal() { Show(); WindowState = WindowState.Normal; ClampPosition(); Activate(); }
     private void Quit() { CancelDrag(); SavePosition(); quitting = true; Close(); Application.Current.Shutdown(); }
-    private bool Save()
+    private bool Save() => TrySave(true);
+    private bool TrySave(bool showError)
     {
         try { store.Save(state); saveError = false; return true; }
         catch (Exception ex)
         {
-            if (!saveError) MessageBox.Show(this, "保存失败，请检查磁盘空间或数据目录权限。当前编辑内容会保留，尚未保存。\n" + ex.Message, "研读桌面", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (showError && !saveError) MessageBox.Show(this, "保存失败，请检查磁盘空间或数据目录权限。当前编辑内容会保留，尚未保存。\n" + ex.Message, "研读桌面", MessageBoxButton.OK, MessageBoxImage.Error);
             saveError = true; footer.Text = "保存失败 · 请检查数据目录"; footer.Foreground = Ui.Red; return false;
         }
+    }
+    private void OpenCompletedReadings()
+    {
+        CancelDrag();
+        new CompletedReadingsDialog(this, state, modelSettings, analysisService, DeleteCompletedReading).ShowDialog();
+    }
+    private bool DeleteCompletedReading(CompletedReading entry)
+    {
+        if (!TaskHistory.DeleteCompleted(state, entry.Item.Id, () => TrySave(false))) return false;
+        if (lastRemoved is { Archived: true } previous && previous.Item.Id == entry.Item.Id) ClearUndo();
+        FooterMessage("已删除完成阅读记录");
+        return true;
     }
     private void UpdateCount()
     {
